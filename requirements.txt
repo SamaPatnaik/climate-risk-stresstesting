@@ -1,0 +1,20 @@
+# Data / geo
+pandas>=2.2
+numpy>=1.26
+geopandas>=0.14
+shapely>=2.0
+pyproj>=3.6
+fiona>=1.9
+pyarrow>=15
+requests>=2.32
+pyyaml>=6.0
+
+# Plots
+matplotlib>=3.8
+
+# API (M6)
+fastapi>=0.110
+uvicorn>=0.29
+
+# Tests
+pytest>=8
