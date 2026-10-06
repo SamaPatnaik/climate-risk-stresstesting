@@ -42,6 +42,7 @@ CHAR_OWNER = 1415       # Owner
 
 SIMPLIFY_OVERLAY_M = 50   # CD simplification for intersection only
 SIMPLIFY_WEB_M = 500      # CD simplification for the web GeoJSON
+MIN_WEB_PART_KM2 = 1.0    # drop islands < 1 km2 from the web GeoJSON (~0.03% of area)
 DEFAULT_VULNERABILITY = 1.0  # PLACEHOLDER: uniform until a vulnerability index is added
 
 
@@ -184,6 +185,10 @@ def build_divisions(start: int, end: int | None, refresh: bool = False):
 def write_geojson(div: pd.DataFrame, cds: gpd.GeoDataFrame, path: Path) -> None:
     web = cds[["cduid", "geometry"]].copy()
     web["geometry"] = web.geometry.simplify(SIMPLIFY_WEB_M, preserve_topology=True)
+    # ~28k coastal island parts dominate file size; display only, hazard uses full geometry
+    parts = web.explode(index_parts=False)
+    parts = parts[parts.geometry.area >= MIN_WEB_PART_KM2 * 1e6]
+    web = parts.dissolve(by="cduid").reset_index()
     web = web.merge(div[["cduid", "cd_name", "hazard_score", "annual_burn_share",
                          "owner_households"]], on="cduid").to_crs(WGS84)
     path.unlink(missing_ok=True)  # GeoJSON driver won't overwrite

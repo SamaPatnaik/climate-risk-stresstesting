@@ -1,4 +1,4 @@
-# Raw data (not committed)
+# Raw data 
 
 These files are git-ignored because of their size. To reproduce, place them here:
 
