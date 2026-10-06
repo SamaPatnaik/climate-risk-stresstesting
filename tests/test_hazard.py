@@ -4,6 +4,7 @@ import json
 import pandas as pd
 import pytest
 
+from src.assumptions import values
 from src.hazard import EXPECTED_BC_CDS, PROCESSED, normalize_hazard
 
 DIV = PROCESSED / "divisions.parquet"
@@ -19,6 +20,16 @@ needs_outputs = pytest.mark.skipif(
 def test_normalize_hazard_scales_to_max():
     h = normalize_hazard(pd.Series([0.0, 0.002, 0.008]))
     assert h.tolist() == [0.0, 0.25, 1.0]
+
+
+def test_normalize_hazard_headroom():
+    h = normalize_hazard(pd.Series([0.002, 0.008]), headroom=2.0)
+    assert h.tolist() == [0.125, 0.5]
+
+
+def test_headroom_prevents_saturation():
+    # max h x max multiplier <= 1, so min(1, h x m) never binds on observed data
+    assert values("model")["hazard_headroom"] >= max(values("scenarios").values())
 
 
 def test_normalize_hazard_rejects_all_zero():
@@ -48,7 +59,7 @@ def test_no_nulls(div):
 @needs_outputs
 def test_hazard_range(div):
     assert div["hazard_score"].between(0, 1).all()
-    assert div["hazard_score"].max() == pytest.approx(1.0)
+    assert div["hazard_score"].max() == pytest.approx(1 / values("model")["hazard_headroom"])
     assert div["annual_burn_share"].between(0, 1).all()
     assert div["ever_burned_share"].between(0, 1).all()
     # sum of yearly burned area >= area burned at least once (reburns counted twice)

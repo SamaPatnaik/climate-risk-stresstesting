@@ -1,0 +1,161 @@
+# Every model parameter, its value, source, and whether it is a placeholder.
+# placeholder: true  -> judgment call, not sourced; candidate for sensitivity analysis.
+# proxy: true        -> sourced, but measures something close to (not exactly) the model input.
+# Code reads only `value`; everything else is documentation served at /api/assumptions.
+
+portfolio:
+  seed:
+    value: 20261006
+    source: Arbitrary; fixes the synthetic portfolio for reproducibility.
+    placeholder: false
+  n_loans:
+    value: 100000
+    unit: loans
+    source: >-
+      Sized as a mid-size lender: ~15% of the 686,228 BC residential mortgages held by
+      reporting banks (CBA, Number of Residential Mortgages in Arrears, month ended July 31, 2026).
+    url: https://cba.ca/mortgages-in-arrears
+    placeholder: true
+  allocation_weight:
+    value: owner_households x pct_owners_with_mortgage
+    source: >-
+      Statistics Canada, Census Profile 2021 (98-401-X2021004), characteristics 1415 (Owner)
+      and 1483 (% of owner households with a mortgage), 25% sample data.
+    url: https://www150.statcan.gc.ca/n1/en/catalogue/98-401-X2021004
+    placeholder: false
+    note: Loans are allocated to census divisions by multinomial draw with these weights.
+  balance_mean:
+    value: 380000
+    unit: CAD
+    source: >-
+      Approximate BC average outstanding mortgage balance reported in secondary sources
+      citing Equifax/CMHC data (2026). Primary CMHC/Equifax table not yet confirmed.
+    placeholder: true
+  balance_sigma:
+    value: 0.6
+    unit: log-CAD
+    source: Shape of the lognormal balance distribution; judgment.
+    placeholder: true
+  balance_value_elasticity:
+    value: 0.5
+    source: >-
+      Division mean balance = balance_mean x (median_dwelling_value / BC weighted mean)^elasticity.
+      Median dwelling value from Census Profile 2021, characteristic 1488. Elasticity < 1 because
+      higher-value markets also carry more equity; the value 0.5 is judgment.
+    placeholder: true
+  insured_share:
+    value: 0.23
+    unit: share of outstanding balances (CAD)
+    source: >-
+      Bank of Canada, Funds advanced and outstanding balances for new and existing lending by
+      chartered banks, July 2026 month-end book values: insured residential mortgages $378,001M
+      (V122667736), uninsured $1,254,149M (V122667742); 378,001 / 1,632,150 = 23.2%.
+      Cross-check: CMHC Residential Mortgage Industry Report, Fall 2024 - 74% of outstanding
+      residential mortgages at chartered banks uninsured in 2024 H1 (basis not stated).
+    url: https://www.bankofcanada.ca/rates/banking-and-financial-statistics/funds-advanced-and-outstanding-balances-for-new-and-existing-lending-by-chartered-banks/
+    placeholder: false
+    proxy: true
+    note: >-
+      National, by dollar value; no BC breakdown in this series. Applied per loan independently
+      of balance, so the portfolio's insured share by count and by dollars are both ~23%. In
+      reality insured loans skew smaller (insurance is unavailable above a price cap), so the
+      real count share is higher than the dollar share, and the BC share likely lower.
+  pd_base:
+    value: 0.0026
+    unit: annual probability
+    source: >-
+      BC share of bank residential mortgages 90+ days in arrears, 0.26%
+      (CBA, month ended July 31, 2026).
+    url: https://cba.ca/mortgages-in-arrears
+    placeholder: false
+    proxy: true
+    note: A point-in-time arrears stock, not a 12-month default rate. Used as a proxy for annual PD.
+  lgd_base_uninsured:
+    value: 0.20
+    unit: share of EAD
+    source: Judgment, set above the 10% regulatory floor below.
+    placeholder: true
+  lgd_floor:
+    value: 0.10
+    unit: share of EAD
+    source: >-
+      OSFI Capital Adequacy Requirements (2026), Chapter 5 (IRB approach), para. 146: "The LGD
+      floor for residential mortgages is fixed at 10% irrespective of the level of collateral
+      provided by the property." [Basel Framework CRE 32.58]. Para. 147: the floor does not apply
+      to any portion guaranteed or insured by the Government of Canada.
+    url: https://www.osfi-bsif.gc.ca/en/guidance/guidance-library/capital-adequacy-requirements-car-2026-chapter-5-credit-risk-internal-ratings-based-approach
+    placeholder: false
+    note: >-
+      Applied to uninsured loans only, consistent with para. 147. Not modelled: the separate
+      downturn LGD (DLGD) floor for new Canadian residential real estate exposures (para. 289),
+      which adds an LTV- and house-price-correction-based add-on; this needs loan-level LTVs.
+      This is a regulatory capital floor, used here as a sanity bound on a stress-test LGD.
+  lgd_base_insured:
+    value: 0.0
+    unit: share of EAD
+    source: >-
+      Credit loss on insured mortgages is transferred to the mortgage insurer (CMHC or private),
+      so the lender's LGD is ~0. Ignores claim haircuts and admin costs, and the 10% deductible
+      portion of privately insured loans not covered by the Government of Canada backstop
+      (OSFI CAR 2026, Ch. 5, para. 147).
+    placeholder: true
+
+# Revisited in M3/M4. Present now so all assumptions live in one place.
+model:
+  hazard_headroom:
+    value: 2.0
+    source: >-
+      Hazard score h = annual_burn_share / (headroom x highest CD share), so the highest-hazard
+      CD has h = 0.5. Set equal to the largest scenario multiplier (hot_house) so the cap in
+      H = min(1, h x m) never binds on observed data; H = 1 is reached only by the
+      highest-hazard CD under Hot House World.
+    placeholder: false
+  beta_pd:
+    value: {dist: lognormal, median: 2.0, sigma: 0.5}
+    source: >-
+      Judgment: at stressed hazard H = 1, PD rises to (1 + beta_pd) x pd_base, i.e. ~3x at the median.
+      With hazard_headroom = 2, the highest-hazard CD is at H = 0.5 historically (PD ~2x).
+      No public data links Canadian mortgage default to wildfire; see stretch goal S1.
+    placeholder: true
+  beta_lgd:
+    value: {dist: lognormal, median: 0.15, sigma: 0.5}
+    source: Judgment; additive LGD uplift at H = 1 and vulnerability = 1.
+    placeholder: true
+  climate_lgd_applies_to_insured:
+    value: false
+    source: Insurer absorbs collateral shortfall on insured loans.
+    placeholder: true
+
+reporting:
+  min_loans_for_tail:
+    value: 100
+    unit: loans per census division
+    source: >-
+      Judgment. With pd_base ~0.26%, a CD with fewer than 100 loans expects < 0.3 defaults per
+      run, so its simulated loss distribution is mostly zeros and a few single-loan jumps;
+      p95/p99/ES are then artefacts of loan granularity, not risk. Below this threshold the
+      CD's tail measures are suppressed (mean EL is still reported, flagged as low-count).
+      The CD's loans remain in the BC portfolio total, whose tails are always reported.
+    placeholder: true
+
+# ILLUSTRATIVE ONLY. Stylized hazard multipliers, NOT NGFS model output.
+# Ordering follows NGFS physical-risk logic: physical risk is lowest in Orderly, similar
+# in Disorderly (which differs mainly in transition risk, out of scope), higher under
+# Current Policies, highest in Hot House World.
+scenarios:
+  orderly:
+    value: 1.2
+    label: Orderly (Net Zero 2050-like)
+    placeholder: true
+  disorderly:
+    value: 1.3
+    label: Disorderly (Delayed Transition-like)
+    placeholder: true
+  current_policies:
+    value: 1.6
+    label: Current Policies
+    placeholder: true
+  hot_house:
+    value: 2.0
+    label: Hot House World
+    placeholder: true

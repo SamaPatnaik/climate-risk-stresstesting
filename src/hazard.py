@@ -19,6 +19,8 @@ import geopandas as gpd
 import pandas as pd
 import requests
 
+from src.assumptions import values
+
 ROOT = Path(__file__).resolve().parents[1]
 RAW = ROOT / "data" / "raw"
 PROCESSED = ROOT / "data" / "processed"
@@ -39,6 +41,15 @@ EXPECTED_BC_CDS = 29
 # Census Profile 2021 characteristic IDs (25% sample data)
 CHAR_HOUSEHOLDS = 1414  # Total - Private households by tenure
 CHAR_OWNER = 1415       # Owner
+CHAR_PCT_MORTGAGE = 1483  # % of owner households with a mortgage
+CHAR_MEDIAN_VALUE = 1488  # Median value of dwellings ($)
+# id -> (output column, substring the characteristic name must contain)
+CENSUS_FIELDS = {
+    CHAR_HOUSEHOLDS: ("private_households", "by tenure"),
+    CHAR_OWNER: ("owner_households", "Owner"),
+    CHAR_PCT_MORTGAGE: ("pct_owners_with_mortgage", "% of owner households with a mortgage"),
+    CHAR_MEDIAN_VALUE: ("median_dwelling_value", "Median value of dwellings"),
+}
 
 SIMPLIFY_OVERLAY_M = 50   # CD simplification for intersection only
 SIMPLIFY_WEB_M = 500      # CD simplification for the web GeoJSON
@@ -95,8 +106,9 @@ def load_cds() -> gpd.GeoDataFrame:
     return cds[["cduid", "cd_name", "land_area_km2", "geometry"]]
 
 
-def load_owner_households() -> pd.DataFrame:
-    """Owner and total private households per BC CD from Census Profile 2021."""
+def load_census_housing() -> pd.DataFrame:
+    """Households, owners, % owners with mortgage, median dwelling value per BC CD
+    from Census Profile 2021 (25% sample data)."""
     cols = ["DGUID", "CHARACTERISTIC_ID", "CHARACTERISTIC_NAME", "C1_COUNT_TOTAL"]
     keep = []
     with zipfile.ZipFile(CENSUS_ZIP) as z, z.open(CENSUS_CSV) as f:
@@ -104,18 +116,18 @@ def load_owner_households() -> pd.DataFrame:
                              dtype={"DGUID": str}, chunksize=500_000)
         for chunk in reader:
             mask = (chunk["DGUID"].str.startswith(BC_DGUID_PREFIX)
-                    & chunk["CHARACTERISTIC_ID"].isin([CHAR_HOUSEHOLDS, CHAR_OWNER]))
+                    & chunk["CHARACTERISTIC_ID"].isin(list(CENSUS_FIELDS)))
             keep.append(chunk[mask])
     df = pd.concat(keep)
 
     # Guard against the IDs meaning something else in some CD.
     names = df.groupby("CHARACTERISTIC_ID")["CHARACTERISTIC_NAME"].unique()
-    assert all(n.strip() == "Owner" for n in names[CHAR_OWNER]), names[CHAR_OWNER]
-    assert all("by tenure" in n for n in names[CHAR_HOUSEHOLDS]), names[CHAR_HOUSEHOLDS]
+    for cid, (_, expected) in CENSUS_FIELDS.items():
+        assert all(expected in n for n in names[cid]), (cid, names[cid])
 
     df["cduid"] = df["DGUID"].str[-4:]
     wide = df.pivot(index="cduid", columns="CHARACTERISTIC_ID", values="C1_COUNT_TOTAL")
-    wide = wide.rename(columns={CHAR_HOUSEHOLDS: "private_households", CHAR_OWNER: "owner_households"})
+    wide = wide.rename(columns={cid: col for cid, (col, _) in CENSUS_FIELDS.items()})
     return wide.reset_index()
 
 
@@ -152,12 +164,17 @@ def ever_burned_km2(fires: gpd.GeoDataFrame, cds: gpd.GeoDataFrame,
     return inter.assign(a=inter.geometry.area / 1e6).groupby("cduid")["a"].sum()
 
 
-def normalize_hazard(annual_share: pd.Series) -> pd.Series:
-    """h = share / max(share): highest-hazard CD = 1, ratios between CDs preserved."""
+def normalize_hazard(annual_share: pd.Series, headroom: float = 1.0) -> pd.Series:
+    """h = share / (headroom x max(share)); ratios between CDs preserved.
+
+    With headroom >= the largest scenario multiplier, the stressed hazard
+    H = min(1, h x m) never saturates for any CD, so the cap can't flatten
+    differences among the highest-hazard CDs.
+    """
     mx = annual_share.max()
     if mx <= 0:
         raise ValueError("no burned area in window; cannot normalize hazard")
-    return annual_share / mx
+    return annual_share / (headroom * mx)
 
 
 def build_divisions(start: int, end: int | None, refresh: bool = False):
@@ -175,10 +192,11 @@ def build_divisions(start: int, end: int | None, refresh: bool = False):
     div["ever_burned_km2"] = ever.reindex(div.index).fillna(0.0)
     div["annual_burn_share"] = div["annual_burned_km2"] / div["land_area_km2"]
     div["ever_burned_share"] = (div["ever_burned_km2"] / div["land_area_km2"]).clip(upper=1.0)
-    div["hazard_score"] = normalize_hazard(div["annual_burn_share"])
+    div["hazard_score"] = normalize_hazard(div["annual_burn_share"],
+                                           values("model")["hazard_headroom"])
     div["vulnerability"] = DEFAULT_VULNERABILITY
     div["window_start"], div["window_end"] = start, end
-    div = div.reset_index().merge(load_owner_households(), on="cduid", how="left")
+    div = div.reset_index().merge(load_census_housing(), on="cduid", how="left")
     return div, yearly, cds
 
 
