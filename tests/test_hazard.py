@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from src.assumptions import values
-from src.hazard import EXPECTED_BC_CDS, PROCESSED, normalize_hazard
+from src.hazard import EXPECTED_BC_CDS, PROCESSED, hazard_reference, normalize_hazard
 
 DIV = PROCESSED / "divisions.parquet"
 YEARLY = PROCESSED / "burn_by_year.parquet"
@@ -17,24 +17,21 @@ needs_outputs = pytest.mark.skipif(
 )
 
 
-def test_normalize_hazard_scales_to_max():
-    h = normalize_hazard(pd.Series([0.0, 0.002, 0.008]))
-    assert h.tolist() == [0.0, 0.25, 1.0]
-
-
-def test_normalize_hazard_headroom():
-    h = normalize_hazard(pd.Series([0.002, 0.008]), headroom=2.0)
-    assert h.tolist() == [0.125, 0.5]
+def test_hazard_reference_uses_worst_year_with_headroom():
+    yearly = pd.Series([0.0, 0.002, 0.008])
+    ref = hazard_reference(yearly, headroom=2.0)
+    assert ref == pytest.approx(0.016)
+    assert normalize_hazard(yearly, ref).tolist() == [0.0, 0.125, 0.5]
 
 
 def test_headroom_prevents_saturation():
-    # max h x max multiplier <= 1, so min(1, h x m) never binds on observed data
+    # max h_y x max multiplier <= 1, so min(1, h x m) never binds on observed data
     assert values("model")["hazard_headroom"] >= max(values("scenarios").values())
 
 
-def test_normalize_hazard_rejects_all_zero():
+def test_hazard_reference_rejects_all_zero():
     with pytest.raises(ValueError):
-        normalize_hazard(pd.Series([0.0, 0.0]))
+        hazard_reference(pd.Series([0.0, 0.0]))
 
 
 @pytest.fixture(scope="module")
@@ -59,7 +56,10 @@ def test_no_nulls(div):
 @needs_outputs
 def test_hazard_range(div):
     assert div["hazard_score"].between(0, 1).all()
-    assert div["hazard_score"].max() == pytest.approx(1 / values("model")["hazard_headroom"])
+    yearly = pd.read_parquet(YEARLY)
+    # worst CD-year sits at 1 / headroom; long-run means are below it
+    assert yearly["hazard"].max() == pytest.approx(1 / values("model")["hazard_headroom"])
+    assert div["hazard_score"].max() < yearly["hazard"].max()
     assert div["annual_burn_share"].between(0, 1).all()
     assert div["ever_burned_share"].between(0, 1).all()
     # sum of yearly burned area >= area burned at least once (reburns counted twice)
@@ -84,6 +84,11 @@ def test_yearly_consistent_with_annual(div):
     annual = yearly.groupby("cduid")["burned_km2"].sum() / n_years
     merged = div.set_index("cduid")["annual_burned_km2"]
     pd.testing.assert_series_equal(annual.sort_index(), merged.sort_index(),
+                                   check_names=False, rtol=1e-9)
+    # bootstrap consistency: mean over years of h_y equals the CD's hazard_score
+    mean_h = yearly.groupby("cduid")["hazard"].mean()
+    pd.testing.assert_series_equal(mean_h.sort_index(),
+                                   div.set_index("cduid")["hazard_score"].sort_index(),
                                    check_names=False, rtol=1e-9)
 
 

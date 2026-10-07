@@ -100,21 +100,35 @@ portfolio:
       (OSFI CAR 2026, Ch. 5, para. 147).
     placeholder: true
 
-# Revisited in M3/M4. Present now so all assumptions live in one place.
 model:
   hazard_headroom:
     value: 2.0
     source: >-
-      Hazard score h = annual_burn_share / (headroom x highest CD share), so the highest-hazard
-      CD has h = 0.5. Set equal to the largest scenario multiplier (hot_house) so the cap in
-      H = min(1, h x m) never binds on observed data; H = 1 is reached only by the
-      highest-hazard CD under Hot House World.
+      h = burn share / (headroom x worst single CD-year burn share on record). The worst CD-year
+      (Northern Rockies 2023, ~14.6% of land burned) maps to h = 0.5; a CD's hazard_score is the
+      mean of its yearly h. Headroom equals the largest scenario multiplier (hot_house), so
+      H = min(1, h x m) never saturates on observed data in any year or scenario. PD is then
+      linear in h (so the PD calibration below is exact); EL is quadratic in h because the PD
+      and LGD uplifts multiply, so expected EL is averaged over fire seasons, not evaluated at
+      the mean hazard.
+    placeholder: false
+  pd_calibration:
+    value: historical_climate
+    source: >-
+      pd_base (0.26%, CBA BC 90+ day arrears) is observed under today's climate, so it is treated
+      as the portfolio PD at the reference scenario (m = 1, historical hazard), not as a
+      no-climate PD. The model uses a no-climate intercept
+        PD_0 = pd_base / mean over loans of (1 + E[beta_pd] x h_cd)
+      so that the loan-count-weighted mean PD at m = 1 equals pd_base exactly. Loan-count
+      weighting matches the CBA measure (% of number of mortgages). Calibrated at the
+      portfolio level (not per CD), so cross-CD hazard differences are preserved.
+      LGD_base is not recalibrated: it is a judgment placeholder, interpreted as no-climate LGD.
     placeholder: false
   beta_pd:
     value: {dist: lognormal, median: 2.0, sigma: 0.5}
     source: >-
-      Judgment: at stressed hazard H = 1, PD rises to (1 + beta_pd) x pd_base, i.e. ~3x at the median.
-      With hazard_headroom = 2, the highest-hazard CD is at H = 0.5 historically (PD ~2x).
+      Judgment: PD = PD_0 x (1 + beta_pd x H). At the median, the worst CD-year on record under
+      historical climate (H = 0.5) doubles PD; the same year under Hot House (H = 1) triples it.
       No public data links Canadian mortgage default to wildfire; see stretch goal S1.
     placeholder: true
   beta_lgd:
@@ -125,6 +139,74 @@ model:
     value: false
     source: Insurer absorbs collateral shortfall on insured loans.
     placeholder: true
+
+simulation:
+  seed:
+    value: 4242
+    source: Arbitrary; separate from the portfolio seed so the book stays fixed while runs vary.
+    placeholder: false
+  n_runs:
+    value: 1000
+    source: >-
+      Monte Carlo runs per scenario. ES_99 averages the worst 1% = 10 runs; the standard error
+      of the mean is reported alongside it.
+    placeholder: false
+  fire_season_bootstrap:
+    value: uniform over window years
+    source: >-
+      Each run draws one historical year (1990-2025, equal weights) and uses that year's
+      burn share in every CD, so spatially correlated bad seasons (2017, 2018, 2021, 2023) hit
+      many CDs in the same run. The same year, betas and default uniforms are shared across
+      scenarios within a run (common random numbers), so scenario differences are not noise.
+    placeholder: false
+    note: >-
+      Equal weights treat 1990s seasons as being as likely as recent ones; the recent decade burned
+      far more. Window choice is tested in the sensitivity analysis (M5).
+
+# One-at-a-time sensitivity (M5). Each parameter moves to `low` and `high` with all others at
+# base. Metric: Hot House EL and ES_99 uplift vs historical for the BC portfolio.
+sensitivity:
+  beta_pd_median:
+    value: {low: 1.0, high: 3.0}
+    source: Judgment; half and 1.5x the base median (2.0). Sigma unchanged.
+    placeholder: true
+  beta_lgd_median:
+    value: {low: 0.075, high: 0.30}
+    source: Judgment; half and double the base median (0.15). Sigma unchanged.
+    placeholder: true
+  pd_base:
+    value: {low: 0.0011, high: 0.0063}
+    source: >-
+      Range of BC annual-average 90+ day arrears rates, 1995-2025: low 0.11% (2022), high 0.63%
+      (2001). CBA, Number of Residential Mortgages in Arrears, historical series by region
+      (month ended July 31, 2026 release). Same proxy caveat as pd_base.
+    url: https://cba.ca/mortgages-in-arrears
+    placeholder: false
+  lgd_base_uninsured:
+    value: {low: 0.10, high: 0.35}
+    source: Low = OSFI 10% LGD floor (CAR 2026 Ch. 5 para. 146); high = judgment.
+    placeholder: true
+  hot_house_multiplier:
+    value: {low: 1.6, high: 2.5}
+    source: >-
+      Low = the current_policies multiplier; high = judgment. Above hazard_headroom (2.0) the
+      cap H = min(1, h x m) starts to bind in the worst CD-years.
+    placeholder: true
+  hazard_headroom:
+    value: {low: 1.5, high: 3.0}
+    source: >-
+      Hazard scale: the burn share that maps to h = 1 is headroom x the worst CD-year. Lower
+      headroom = larger h for the same fire (and, at 1.5 under Hot House, saturation in the
+      worst CD-years). Judgment range.
+    placeholder: true
+  fire_window:
+    value: {low: [1990, 2025], high: [2015, 2025]}
+    source: >-
+      Which fire seasons define historical climate (and are bootstrapped). Low = base window;
+      high = the last 11 seasons, which include 2017, 2018, 2021 and 2023-2025. The hazard
+      reference (worst CD-year, Northern Rockies 2023) is in both windows, so only the set of
+      seasons changes. PD_0 is recalibrated so the observed PD still holds at historical climate.
+    placeholder: false
 
 reporting:
   min_loans_for_tail:
@@ -143,6 +225,13 @@ reporting:
 # in Disorderly (which differs mainly in transition risk, out of scope), higher under
 # Current Policies, highest in Hot House World.
 scenarios:
+  historical:
+    value: 1.0
+    label: Historical climate (reference, 1990-2025 fire seasons)
+    source: >-
+      Reference scenario: observed hazard, no scaling. All climate uplifts are reported relative
+      to this scenario; EL with no wildfire hazard (H = 0) is kept as a secondary column.
+    placeholder: false
   orderly:
     value: 1.2
     label: Orderly (Net Zero 2050-like)

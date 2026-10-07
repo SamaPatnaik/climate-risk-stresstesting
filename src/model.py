@@ -2,14 +2,21 @@
 
 Per loan, for a scenario with hazard multiplier m:
     H   = min(1, h x m)                               stressed hazard
-    PD  = min(1, PD_base x (1 + beta_pd x H))
+    PD  = min(1, PD_0 x (1 + beta_pd x H))
     LGD = min(1, LGD_base + beta_lgd x H x v)         uninsured loans only by default
     EL  = PD x LGD x EAD
-The climate uplift is EL minus EL with H = 0 (PD_base, LGD_base).
+PD_0 is the no-climate intercept, calibrated so the portfolio PD at the reference
+scenario (historical climate, m = 1) equals the observed pd_base (see
+calibrate_pd). Climate uplift is EL minus EL at m = 1; EL at H = 0 is kept as
+a secondary column.
 
-With independent betas and caps not binding, EL is linear in beta_pd, beta_lgd
-and their product, so E[EL] = EL evaluated at E[beta_pd], E[beta_lgd]. M4's
-Monte Carlo mean should converge to deterministic_el(...) at the beta means.
+EL is bilinear in (beta_pd, beta_lgd), which are independent, so E over betas =
+EL at E[beta]. But EL is QUADRATIC in H (the PD and LGD uplifts multiply), so
+E over fire seasons of EL > EL at the mean hazard (Jensen). The Monte Carlo
+mean therefore converges to expected_el_over_seasons(...), not to
+deterministic_el(...) at the mean hazard; the gap is the extra loss from fire
+risk arriving in concentrated bad seasons. PD alone is linear in H, so the PD
+calibration at the mean hazard is exact.
 
 Usage (from project root):
     python -m src.model
@@ -22,6 +29,7 @@ from src.hazard import PROCESSED
 
 TAIL_COLS = ["loss_p95", "loss_p99", "es_99"]
 PORTFOLIO_ID = "BC"
+REFERENCE_SCENARIO = "historical"
 
 
 def stress_hazard(h, m):
@@ -50,9 +58,24 @@ def lognormal_mean(spec: dict) -> float:
 
 
 def attach_hazard(loans: pd.DataFrame, div: pd.DataFrame) -> pd.DataFrame:
-    """Add each loan's CD hazard_score and vulnerability."""
+    """Add each loan's CD hazard_score and vulnerability (no-op if already attached)."""
+    if "hazard_score" in loans.columns:
+        return loans.copy()
     out = loans.merge(div[["cduid", "hazard_score", "vulnerability"]], on="cduid", how="left")
     assert out["hazard_score"].notna().all(), "loans reference unknown cduid"
+    return out
+
+
+def calibrate_pd(loans: pd.DataFrame, div: pd.DataFrame, beta_pd_mean: float) -> pd.DataFrame:
+    """Replace observed pd_base with the no-climate intercept PD_0.
+
+    PD_0 = pd_observed / mean_loans(1 + E[beta_pd] x h), so the loan-count-weighted
+    mean PD at m = 1 equals the observed rate. Keeps pd_observed for reference.
+    """
+    out = attach_hazard(loans, div)
+    factor = (1 + beta_pd_mean * out["hazard_score"]).mean()
+    out["pd_observed"] = out["pd_base"]
+    out["pd_base"] = out["pd_base"] / factor
     return out
 
 
@@ -68,7 +91,11 @@ def loan_el(loans: pd.DataFrame, m: float, beta_pd: float, beta_lgd: float,
 
 def deterministic_el(loans: pd.DataFrame, div: pd.DataFrame, multipliers: dict,
                      beta_pd: float, beta_lgd: float, applies_to_insured: bool = False) -> pd.DataFrame:
-    """EL per (CD, scenario) plus a portfolio row (cduid = "BC")."""
+    """EL per (CD, scenario) plus a portfolio row (cduid = "BC").
+
+    `multipliers` must include the reference scenario; el_uplift is measured against it.
+    """
+    assert REFERENCE_SCENARIO in multipliers, f"missing reference scenario {REFERENCE_SCENARIO!r}"
     lx = attach_hazard(loans, div)
     lx["el_no_climate"] = expected_loss(lx["pd_base"], lx["lgd_base"], lx["balance"])
     rows = []
@@ -80,8 +107,39 @@ def deterministic_el(loans: pd.DataFrame, div: pd.DataFrame, multipliers: dict,
         g["scenario"], g["multiplier"] = scenario, m
         rows.append(g)
     out = pd.concat(rows).rename_axis("cduid").reset_index()
-    out["el_uplift"] = out["el"] - out["el_no_climate"]
-    out["el_rate_bps"] = out["el"] / out["ead_total"] * 1e4
+    return add_uplift_columns(out, "el")
+
+
+def expected_el_over_seasons(loans: pd.DataFrame, div: pd.DataFrame, yearly: pd.DataFrame,
+                             multipliers: dict, beta_pd: float, beta_lgd: float,
+                             applies_to_insured: bool = False) -> pd.DataFrame:
+    """E[EL] under the fire-season bootstrap: mean over years (equal weights) of
+    deterministic_el using that year's hazard h_y in every CD. Same columns as deterministic_el."""
+    base = loans.drop(columns=["hazard_score", "vulnerability"], errors="ignore")
+    per_year = []
+    for _, g in yearly.groupby("year"):
+        div_y = div.drop(columns="hazard_score").merge(
+            g[["cduid", "hazard"]].rename(columns={"hazard": "hazard_score"}), on="cduid")
+        per_year.append(deterministic_el(base, div_y, multipliers, beta_pd, beta_lgd,
+                                         applies_to_insured))
+    allyears = pd.concat(per_year)
+    out = (allyears.groupby(["cduid", "scenario"], sort=False)
+           .agg(n_loans=("n_loans", "first"), ead_total=("ead_total", "first"),
+                el=("el", "mean"), el_no_climate=("el_no_climate", "first"),
+                multiplier=("multiplier", "first"))
+           .reset_index())
+    return add_uplift_columns(out, "el")
+
+
+def add_uplift_columns(res: pd.DataFrame, el_col: str) -> pd.DataFrame:
+    """Uplift vs the reference scenario (primary) and vs H = 0 (secondary), per CD."""
+    ref = res.loc[res["scenario"] == REFERENCE_SCENARIO].set_index("cduid")[el_col]
+    out = res.copy()
+    out["el_ref"] = out["cduid"].map(ref)
+    out["el_uplift"] = out[el_col] - out["el_ref"]
+    out["el_uplift_pct"] = np.where(out["el_ref"] > 0, out["el_uplift"] / out["el_ref"] * 100, np.nan)
+    out["el_uplift_vs_no_climate"] = out[el_col] - out["el_no_climate"]
+    out["el_rate_bps"] = out[el_col] / out["ead_total"] * 1e4
     return out
 
 
@@ -93,7 +151,8 @@ def suppress_small_tails(results: pd.DataFrame, min_loans: int) -> pd.DataFrame:
     out = results.copy()
     small = (out["n_loans"] < min_loans) & (out["cduid"] != PORTFOLIO_ID)
     out["tail_suppressed"] = small
-    cols = [c for c in TAIL_COLS if c in out.columns]
+    # tail measures and anything derived from them (e.g. loss_p99_uplift)
+    cols = [c for c in out.columns if any(c.startswith(t) for t in TAIL_COLS)]
     out[cols] = out[cols].astype(float)
     out.loc[small, cols] = np.nan
     return out
@@ -103,22 +162,24 @@ def main() -> None:
     div = pd.read_parquet(PROCESSED / "divisions.parquet")
     loans = pd.read_parquet(PROCESSED / "loans.parquet")
     mp = values("model")
-    res = deterministic_el(loans, div, values("scenarios"),
-                           lognormal_mean(mp["beta_pd"]), lognormal_mean(mp["beta_lgd"]),
+    bpd, blgd = lognormal_mean(mp["beta_pd"]), lognormal_mean(mp["beta_lgd"])
+    lx = calibrate_pd(loans, div, bpd)
+    print(f"PD calibration: observed {lx['pd_observed'].iloc[0]:.4%} -> "
+          f"no-climate intercept PD_0 {lx['pd_base'].iloc[0]:.4%}")
+    res = deterministic_el(lx, div, values("scenarios"), bpd, blgd,
                            mp["climate_lgd_applies_to_insured"])
 
     bc = res[res["cduid"] == PORTFOLIO_ID].set_index("scenario")
-    print("BC portfolio, deterministic EL at E[beta] (ILLUSTRATIVE scenarios):")
-    print(bc[["multiplier", "el", "el_no_climate", "el_uplift", "el_rate_bps"]].to_string(
-        float_format=lambda x: f"{x:,.2f}"))
+    print("\nBC portfolio, deterministic EL at E[beta] (ILLUSTRATIVE scenarios, reference = historical):")
+    print(bc[["multiplier", "el", "el_uplift", "el_uplift_pct", "el_no_climate",
+              "el_rate_bps"]].to_string(float_format=lambda x: f"{x:,.2f}"))
 
     hh = res[(res["scenario"] == "hot_house") & (res["cduid"] != PORTFOLIO_ID)]
     hh = hh.merge(div[["cduid", "cd_name", "hazard_score"]], on="cduid")
-    hh["uplift_pct"] = hh["el_uplift"] / hh["el_no_climate"] * 100
-    print("\nTop CDs by EL uplift, hot_house:")
+    print("\nTop CDs by EL uplift vs historical, hot_house:")
     print(hh.sort_values("el_uplift", ascending=False).head(8)[
-        ["cduid", "cd_name", "n_loans", "hazard_score", "el_uplift", "uplift_pct"]].to_string(
-        index=False, float_format=lambda x: f"{x:,.2f}"))
+        ["cduid", "cd_name", "n_loans", "hazard_score", "el_uplift", "el_uplift_pct"]].to_string(
+        index=False, float_format=lambda x: f"{x:,.4f}" if abs(x) < 1 else f"{x:,.2f}"))
 
 
 if __name__ == "__main__":

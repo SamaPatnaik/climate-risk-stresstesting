@@ -3,8 +3,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.model import (PORTFOLIO_ID, deterministic_el, expected_loss, lognormal_mean, loan_el,
-                       stress_hazard, stressed_lgd, stressed_pd, suppress_small_tails)
+from src.model import (PORTFOLIO_ID, REFERENCE_SCENARIO, calibrate_pd, deterministic_el,
+                       expected_loss, lognormal_mean, loan_el, stress_hazard, stressed_lgd,
+                       stressed_pd, suppress_small_tails)
 
 # ---------------------------------------------------------------------------
 # Worked example (computed by hand; README uses the same numbers)
@@ -21,8 +22,13 @@ from src.model import (PORTFOLIO_ID, deterministic_el, expected_loss, lognormal_
 #   EL  = 0.0051792 x 0.2744 x 300,000
 #       = 0.0051792 x 82,320                = $426.35
 #
-#   No-climate EL = 0.0026 x 0.20 x 300,000 = $156.00
-#   Climate uplift = 426.35 - 156.00        = $270.35  (+173%)
+#   Reference (historical, m = 1): H = 0.31
+#     PD = 0.0026 x 1.62 = 0.004212, LGD = 0.2465 -> EL = $311.48
+#   Climate uplift vs historical = 426.35 - 311.48 = $114.87  (+37%)
+#   Secondary, vs no wildfire (H = 0): EL = 0.0026 x 0.20 x 300,000 = $156.00
+#     -> uplift vs no climate = $270.35
+#   (PD_base here is used as given; in the pipeline it is first calibrated to
+#    the no-climate intercept PD_0, see test_pd_calibration_matches_observed_at_reference.)
 #
 #   Same loan, insured: LGD stays 0 (insurer absorbs loss), so EL = $0
 #   despite PD rising to 0.0051792.
@@ -112,9 +118,12 @@ def small_book():
     return loans, div
 
 
+SCEN = {REFERENCE_SCENARIO: 1.0, "orderly": 1.2, "current_policies": 1.6}
+
+
 def test_deterministic_el_aggregation(small_book):
     loans, div = small_book
-    res = deterministic_el(loans, div, {"orderly": 1.2, "current_policies": 1.6}, 2.0, 0.15)
+    res = deterministic_el(loans, div, SCEN, 2.0, 0.15)
     cp = res[res["scenario"] == "current_policies"].set_index("cduid")
     # 5901: worked-example loan + insured loan (EL 0); 5915: h = 0 so EL = baseline
     assert cp.loc["5901", "el"] == pytest.approx(426.351744)
@@ -124,7 +133,40 @@ def test_deterministic_el_aggregation(small_book):
     assert cp.loc[PORTFOLIO_ID, "n_loans"] == 3
     # higher multiplier -> higher portfolio EL
     bc = res[res["cduid"] == PORTFOLIO_ID].set_index("scenario")["el"]
-    assert bc["orderly"] < bc["current_policies"]
+    assert bc[REFERENCE_SCENARIO] < bc["orderly"] < bc["current_policies"]
+
+
+def test_uplift_measured_against_reference(small_book):
+    # worked-example loan at m = 1: H = 0.31, PD = 0.0026 x 1.62 = 0.004212,
+    # LGD = 0.20 + 0.15 x 0.31 = 0.2465, EL = 0.004212 x 0.2465 x 300,000 = $311.48
+    # -> current_policies uplift vs historical = 426.35 - 311.48 = $114.87
+    loans, div = small_book
+    res = deterministic_el(loans, div, SCEN, 2.0, 0.15)
+    r = res.set_index(["scenario", "cduid"])
+    el_ref = 0.0026 * (1 + 2.0 * 0.31) * (0.20 + 0.15 * 0.31) * 300_000
+    assert el_ref == pytest.approx(311.4774)
+    assert r.loc[(REFERENCE_SCENARIO, "5901"), "el"] == pytest.approx(el_ref)
+    assert r.loc[(REFERENCE_SCENARIO, "5901"), "el_uplift"] == pytest.approx(0.0)
+    assert r.loc[("current_policies", "5901"), "el_uplift"] == pytest.approx(426.351744 - el_ref)
+    # secondary column: uplift vs H = 0 is unchanged from the worked example
+    assert r.loc[("current_policies", "5901"), "el_uplift_vs_no_climate"] == pytest.approx(270.351744)
+
+
+def test_reference_scenario_required(small_book):
+    loans, div = small_book
+    with pytest.raises(AssertionError):
+        deterministic_el(loans, div, {"orderly": 1.2}, 2.0, 0.15)
+
+
+def test_pd_calibration_matches_observed_at_reference(small_book):
+    loans, div = small_book
+    lx = calibrate_pd(loans, div, beta_pd_mean=2.0)
+    # loan-count-weighted mean PD at m = 1 equals the observed 0.26%
+    pd_ref = stressed_pd(lx["pd_base"], stress_hazard(lx["hazard_score"], 1.0), 2.0)
+    assert pd_ref.mean() == pytest.approx(0.0026)
+    assert (lx["pd_observed"] == 0.0026).all()
+    # hand check: hazards (0.31, 0.31, 0) -> factor = mean(1.62, 1.62, 1) = 1.41333
+    assert lx["pd_base"].iloc[0] == pytest.approx(0.0026 / (4.24 / 3))
 
 
 # --- tail suppression ---------------------------------------------------------

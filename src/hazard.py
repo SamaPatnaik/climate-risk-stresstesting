@@ -1,10 +1,10 @@
 """M1: wildfire hazard table per BC census division (CD).
 
 Outputs (data/processed/):
-  divisions.parquet     one row per CD: land area, burn shares, hazard score h,
-                        vulnerability placeholder, owner households
-  burn_by_year.parquet  one row per (CD, year) incl. zero-burn years; used later
-                        for the fire-season bootstrap and window sensitivity
+  divisions.parquet     one row per CD: land area, burn shares, hazard score h
+                        (mean over years of h_y), vulnerability placeholder, census housing
+  burn_by_year.parquet  one row per (CD, year) incl. zero-burn years, with that year's
+                        hazard h_y; used for the fire-season bootstrap and window sensitivity
   divisions.geojson     simplified EPSG:4326 boundaries + key fields for the web map
 
 Usage (from project root):
@@ -164,17 +164,22 @@ def ever_burned_km2(fires: gpd.GeoDataFrame, cds: gpd.GeoDataFrame,
     return inter.assign(a=inter.geometry.area / 1e6).groupby("cduid")["a"].sum()
 
 
-def normalize_hazard(annual_share: pd.Series, headroom: float = 1.0) -> pd.Series:
-    """h = share / (headroom x max(share)); ratios between CDs preserved.
+def hazard_reference(yearly_share: pd.Series, headroom: float = 1.0) -> float:
+    """Burn share mapped to h = 1: headroom x the worst single CD-year on record.
 
-    With headroom >= the largest scenario multiplier, the stressed hazard
-    H = min(1, h x m) never saturates for any CD, so the cap can't flatten
-    differences among the highest-hazard CDs.
+    Using the worst CD-year (not the worst long-run mean) keeps every bootstrapped
+    fire season on the same linear scale: with headroom >= the largest scenario
+    multiplier, H = min(1, h x m) never saturates on observed data, in any year.
     """
-    mx = annual_share.max()
+    mx = yearly_share.max()
     if mx <= 0:
         raise ValueError("no burned area in window; cannot normalize hazard")
-    return annual_share / (headroom * mx)
+    return headroom * mx
+
+
+def normalize_hazard(share: pd.Series, reference: float) -> pd.Series:
+    """h = burn share / reference share; linear, so mean over years of h_y = h of the mean."""
+    return share / reference
 
 
 def build_divisions(start: int, end: int | None, refresh: bool = False):
@@ -192,8 +197,10 @@ def build_divisions(start: int, end: int | None, refresh: bool = False):
     div["ever_burned_km2"] = ever.reindex(div.index).fillna(0.0)
     div["annual_burn_share"] = div["annual_burned_km2"] / div["land_area_km2"]
     div["ever_burned_share"] = (div["ever_burned_km2"] / div["land_area_km2"]).clip(upper=1.0)
-    div["hazard_score"] = normalize_hazard(div["annual_burn_share"],
-                                           values("model")["hazard_headroom"])
+    ref = hazard_reference(yearly["burn_share"], values("model")["hazard_headroom"])
+    yearly["hazard"] = normalize_hazard(yearly["burn_share"], ref)
+    div["hazard_score"] = normalize_hazard(div["annual_burn_share"], ref)
+    div["hazard_reference_share"] = ref
     div["vulnerability"] = DEFAULT_VULNERABILITY
     div["window_start"], div["window_end"] = start, end
     div = div.reset_index().merge(load_census_housing(), on="cduid", how="left")
