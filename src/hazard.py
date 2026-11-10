@@ -21,9 +21,7 @@ import requests
 
 from src.assumptions import values
 
-ROOT = Path(__file__).resolve().parents[1]
-RAW = ROOT / "data" / "raw"
-PROCESSED = ROOT / "data" / "processed"
+from src.paths import PROCESSED, RAW, ROOT  # noqa: F401  (re-exported for tests/scripts)
 
 ALBERS = "EPSG:3005"
 WGS84 = "EPSG:4326"

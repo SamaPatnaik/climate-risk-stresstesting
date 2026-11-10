@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 
 from src.assumptions import values
-from src.hazard import PROCESSED
+from src.paths import PROCESSED
 from src.model import (PORTFOLIO_ID, REFERENCE_SCENARIO, TAIL_COLS, add_uplift_columns, calibrate_pd,
                        deterministic_el, expected_el_over_seasons, lognormal_mean,
                        suppress_small_tails)

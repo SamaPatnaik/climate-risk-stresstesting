@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 
 from src.assumptions import values
-from src.hazard import PROCESSED
+from src.paths import PROCESSED
 
 TAIL_COLS = ["loss_p95", "loss_p99", "es_99"]
 PORTFOLIO_ID = "BC"

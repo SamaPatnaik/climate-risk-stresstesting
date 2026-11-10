@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 
 from src.assumptions import values
-from src.hazard import PROCESSED
+from src.paths import PROCESSED
 
 
 def mortgage_weights(div: pd.DataFrame) -> pd.Series:

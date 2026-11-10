@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BC Wildfire Stress Test</title>
+  <meta name="description" content="Physical climate risk stress test of a synthetic BC mortgage portfolio: wildfire hazard by census division under stylized NGFS-style scenarios.">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="page-header">
+    <div class="wrap header-row">
+      <div>
+        <h1>BC Wildfire Mortgage Stress Test</h1>
+        <p class="subtitle">Physical climate risk for a synthetic BC mortgage portfolio, by census division</p>
+      </div>
+      <button id="theme-toggle" class="btn-ghost" type="button" aria-label="Toggle colour theme">Theme: system</button>
+    </div>
+  </header>
+
+  <div class="banner" role="note">
+    <div class="wrap">
+      <strong>Illustrative only.</strong>
+      Scenario multipliers are stylized and illustrative, <strong>not NGFS model output</strong>.
+      The loan portfolio is synthetic. Uplifts are measured against historical climate (1990&ndash;2025 fire seasons).
+    </div>
+  </div>
+
+  <main class="wrap">
+    <section class="controls" aria-label="Filters">
+      <label>Scenario
+        <select id="scenario"></select>
+      </label>
+      <label>Map metric
+        <select id="metric"></select>
+      </label>
+      <span id="status" class="status" aria-live="polite">Loading&hellip;</span>
+    </section>
+
+    <section class="tiles" id="tiles" aria-label="BC portfolio summary"></section>
+
+    <section class="grid-map">
+      <div class="card map-card">
+        <h2 id="map-title">Map</h2>
+        <div id="map" role="img" aria-label="Choropleth map of BC census divisions"></div>
+        <div id="legend" class="legend"></div>
+      </div>
+      <aside class="card detail" id="detail" aria-live="polite">
+        <h2>Division detail</h2>
+        <p class="muted">Click a division on the map or in the table.</p>
+      </aside>
+    </section>
+
+    <section class="grid-2">
+      <div class="card">
+        <h2>Mean EL uplift by scenario</h2>
+        <p class="muted small">BC portfolio, vs historical climate, $M</p>
+        <div class="chart-box"><canvas id="chart-el"></canvas></div>
+      </div>
+      <div class="card">
+        <h2>ES 99% uplift by scenario</h2>
+        <p class="muted small">BC portfolio, vs historical climate, $M</p>
+        <div class="chart-box"><canvas id="chart-es"></canvas></div>
+      </div>
+    </section>
+
+    <section class="grid-2">
+      <div class="card">
+        <h2 id="hist-title">Simulated annual loss distribution</h2>
+        <p class="muted small">BC portfolio, 1,000 Monte Carlo runs, each drawing a historical fire season</p>
+        <div class="chart-box"><canvas id="chart-hist"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <h2>Sensitivity (tornado)</h2>
+          <select id="tornado-metric" aria-label="Tornado metric">
+            <option value="el_uplift">Mean EL uplift</option>
+            <option value="es_uplift">ES 99% uplift</option>
+          </select>
+        </div>
+        <p class="muted small">Hot House vs historical, one parameter at a time; bar ends labelled with the input value</p>
+        <div class="chart-box tall"><canvas id="chart-tornado"></canvas></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 id="table-title">Census divisions</h2>
+      <p class="muted small">Click a column to sort. &ldquo;&mdash;&rdquo; = tail measure not reported (fewer than 100 loans; mean EL still shown).</p>
+      <div class="table-scroll">
+        <table id="table"><thead></thead><tbody></tbody></table>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Assumptions</h2>
+      <p class="muted small">Every parameter with its value and source. <span class="badge">placeholder</span> = judgment, not sourced; <span class="badge badge-proxy">proxy</span> = sourced, but measures something close to the model input.</p>
+      <div id="assumptions"></div>
+    </section>
+
+    <section class="card method">
+      <h2>Method in brief</h2>
+      <ul>
+        <li><strong>Hazard.</strong> Share of each division's land burned per year (BC Wildfire Service historical perimeters, 1990&ndash;2025), scaled so twice the worst division-year on record = 1.</li>
+        <li><strong>Model.</strong> H = min(1, h &times; m); PD = PD<sub>0</sub>(1 + &beta;<sub>PD</sub>H); LGD = LGD<sub>0</sub> + &beta;<sub>LGD</sub>H (uninsured loans); EL = PD &times; LGD &times; EAD. PD<sub>0</sub> is calibrated so BC PD equals observed 90+ day arrears (0.26%) under historical climate.</li>
+        <li><strong>Simulation.</strong> Each run draws one historical fire season, both betas and a default for every loan; the same draws are shared across scenarios. Portfolio tail measures come from per-run totals, never sums of division tails.</li>
+        <li><strong>Framing.</strong> Scenario names follow NGFS categories and the exercise is framed against OSFI Guideline B-15; neither is claimed to be reproduced.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="wrap footer muted small">
+    Data: BC Wildfire Service (Open Government Licence &ndash; BC); Statistics Canada 2021 Census and boundary files; CBA; Bank of Canada; OSFI.
+  </footer>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
