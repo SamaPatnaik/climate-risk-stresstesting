@@ -10,108 +10,201 @@
 </head>
 <body>
   <header class="page-header">
-    <div class="wrap header-row">
-      <div>
-        <h1>BC Wildfire Mortgage Stress Test</h1>
-        <p class="subtitle">Physical climate risk for a synthetic BC mortgage portfolio, by census division</p>
-      </div>
-      <button id="theme-toggle" class="btn-ghost" type="button" aria-label="Toggle colour theme">Theme: system</button>
+    <div class="col">
+      <h1>BC Wildfire Mortgage Stress Test</h1>
+      <p class="subtitle">How much more a BC mortgage book could lose to wildfire in a hotter climate, by census division.</p>
+      <nav class="tabs" role="tablist" aria-label="Sections">
+        <button type="button" role="tab" id="tab-story" aria-controls="panel-story" aria-selected="true">Story</button>
+        <button type="button" role="tab" id="tab-explore" aria-controls="panel-explore" aria-selected="false" tabindex="-1">Explore</button>
+        <button type="button" role="tab" id="tab-method" aria-controls="panel-method" aria-selected="false" tabindex="-1">Method</button>
+      </nav>
     </div>
   </header>
 
-  <div class="banner" role="note">
-    <div class="wrap">
-      <strong>Illustrative only.</strong>
-      Scenario multipliers are stylized and illustrative, <strong>not NGFS model output</strong>.
-      The loan portfolio is synthetic. Uplifts are measured against historical climate (1990&ndash;2025 fire seasons).
-    </div>
-  </div>
+  <p id="status" class="col status" aria-live="polite">Loading data&hellip;</p>
 
-  <main class="wrap">
-    <section class="controls" aria-label="Filters">
-      <label>Scenario
-        <select id="scenario"></select>
-      </label>
-      <label>Map metric
-        <select id="metric"></select>
-      </label>
-      <span id="status" class="status" aria-live="polite">Loading&hellip;</span>
-    </section>
-
-    <section class="tiles" id="tiles" aria-label="BC portfolio summary"></section>
-
-    <section class="grid-map">
-      <div class="card map-card">
-        <h2 id="map-title">Map</h2>
-        <div id="map" role="img" aria-label="Choropleth map of BC census divisions"></div>
-        <div id="legend" class="legend"></div>
-      </div>
-      <aside class="card detail" id="detail" aria-live="polite">
-        <h2>Division detail</h2>
-        <p class="muted">Click a division on the map or in the table.</p>
-      </aside>
-    </section>
-
-    <section class="grid-2">
-      <div class="card">
-        <h2>Mean EL uplift by scenario</h2>
-        <p class="muted small">BC portfolio, vs historical climate, $M</p>
-        <div class="chart-box"><canvas id="chart-el"></canvas></div>
-      </div>
-      <div class="card">
-        <h2>ES 99% uplift by scenario</h2>
-        <p class="muted small">BC portfolio, vs historical climate, $M</p>
-        <div class="chart-box"><canvas id="chart-es"></canvas></div>
-      </div>
-    </section>
-
-    <section class="grid-2">
-      <div class="card">
-        <h2 id="hist-title">Simulated annual loss distribution</h2>
-        <p class="muted small">BC portfolio, 1,000 Monte Carlo runs, each drawing a historical fire season</p>
-        <div class="chart-box"><canvas id="chart-hist"></canvas></div>
-      </div>
-      <div class="card">
-        <div class="card-head">
-          <h2>Sensitivity (tornado)</h2>
-          <select id="tornado-metric" aria-label="Tornado metric">
-            <option value="el_uplift">Mean EL uplift</option>
-            <option value="es_uplift">ES 99% uplift</option>
-          </select>
+  <main>
+    <!-- ================= Story ================= -->
+    <section id="panel-story" role="tabpanel" aria-labelledby="tab-story" tabindex="0" class="panel">
+      <article class="story-section">
+        <div class="col">
+          <h2 id="s1-head">&nbsp;</h2>
         </div>
-        <p class="muted small">Hot House vs historical, one parameter at a time; bar ends labelled with the input value</p>
-        <div class="chart-box tall"><canvas id="chart-tornado"></canvas></div>
+        <div class="col answer">
+          <div class="figure-pair">
+            <div class="big">
+              <div class="big-label">An average year</div>
+              <div class="big-num" id="s1-el-pct">&nbsp;</div>
+              <div class="big-sub" id="s1-el-usd">&nbsp;</div>
+              <p class="big-def">Mean expected loss, Hot House vs historical climate</p>
+            </div>
+            <div class="big key">
+              <div class="big-label">A severe fire year</div>
+              <div class="big-num" id="s1-es-pct">&nbsp;</div>
+              <div class="big-sub" id="s1-es-usd">&nbsp;</div>
+              <p class="big-def">ES 99%: the average loss in the worst 1 of every 100 simulated years</p>
+            </div>
+          </div>
+          <p class="fineprint">Illustrative: synthetic portfolio and stylized scenarios, not NGFS output.</p>
+        </div>
+      </article>
+
+      <article class="story-section">
+        <div class="col">
+          <h2 id="s2-head">&nbsp;</h2>
+          <p id="s2-body"></p>
+        </div>
+        <div class="col">
+          <div id="story-map" class="map" role="img" aria-label="Map of BC census divisions shaded by Hot House expected-loss uplift, with the top three divisions highlighted"></div>
+          <div id="story-legend" class="legend"></div>
+        </div>
+      </article>
+
+      <article class="story-section">
+        <div class="col">
+          <h2 id="s3-head">&nbsp;</h2>
+          <p id="s3-body"></p>
+        </div>
+        <div class="col">
+          <div class="chart-box"><canvas id="chart-story-hist" aria-label="Histogram of simulated annual portfolio losses under Hot House, worst 1% highlighted"></canvas></div>
+          <p class="chart-note" id="s3-note"></p>
+        </div>
+      </article>
+
+      <article class="story-section">
+        <div class="col">
+          <h2 id="s4-head">&nbsp;</h2>
+          <p id="s4-body"></p>
+        </div>
+        <div class="col">
+          <div class="chart-box tall"><canvas id="chart-story-tornado" aria-label="Tornado chart of mean EL uplift sensitivity"></canvas></div>
+        </div>
+      </article>
+
+      <article class="story-section closing">
+        <div class="col">
+          <p>To compare scenarios or look up a single division, open <a href="#explore">Explore</a>.
+             Definitions, the model steps and its limitations are under <a href="#method">Method</a>.</p>
+        </div>
+      </article>
+    </section>
+
+    <!-- ================= Explore ================= -->
+    <section id="panel-explore" role="tabpanel" aria-labelledby="tab-explore" tabindex="0" class="panel" hidden>
+      <div class="col">
+        <div class="controls">
+          <label for="scenario">Scenario
+            <select id="scenario"></select>
+          </label>
+          <label for="metric">Map shows
+            <select id="metric"></select>
+          </label>
+        </div>
+
+        <h2 id="map-title" class="explore-head">Map</h2>
+        <div class="explore-map">
+          <div class="map-col">
+            <div id="map" class="map" role="img" aria-label="Choropleth map of BC census divisions"></div>
+            <div id="legend" class="legend"></div>
+          </div>
+          <aside id="detail" class="detail" aria-live="polite">
+            <p class="muted">Click a division on the map or in the table.</p>
+          </aside>
+        </div>
+
+        <h2 class="explore-head">Uplift by scenario</h2>
+        <p class="lede">Each scenario compared with historical climate, as a share of the historical figure. Hover a bar for dollars.</p>
+        <div id="scenario-legend" class="legend"></div>
+        <div class="chart-box"><canvas id="chart-scenarios" aria-label="Mean EL uplift and ES 99% uplift by scenario"></canvas></div>
+
+        <div class="head-row">
+          <h2 class="explore-head">Sensitivity</h2>
+          <label for="tornado-metric" class="inline-label">Measure
+            <select id="tornado-metric">
+              <option value="el_uplift">Mean EL uplift</option>
+              <option value="es_uplift">ES 99% uplift</option>
+            </select>
+          </label>
+        </div>
+        <p class="lede">Hot House vs historical, changing one input at a time. Bar ends show the input value used.</p>
+        <div class="chart-box tall"><canvas id="chart-tornado" aria-label="Tornado chart"></canvas></div>
+
+        <h2 id="table-title" class="explore-head">Census divisions</h2>
+        <p class="lede">Click a column heading to sort. A dash means the division has fewer than 100 loans, so tail measures are not reported; its mean EL is still shown and counts in the BC total.</p>
+        <div class="table-scroll">
+          <table id="table"><thead></thead><tbody></tbody></table>
+        </div>
       </div>
     </section>
 
-    <section class="card">
-      <h2 id="table-title">Census divisions</h2>
-      <p class="muted small">Click a column to sort. &ldquo;&mdash;&rdquo; = tail measure not reported (fewer than 100 loans; mean EL still shown).</p>
-      <div class="table-scroll">
-        <table id="table"><thead></thead><tbody></tbody></table>
+    <!-- ================= Method ================= -->
+    <section id="panel-method" role="tabpanel" aria-labelledby="tab-method" tabindex="0" class="panel" hidden>
+      <div class="col method">
+        <h2>Terms used on this page</h2>
+        <dl class="glossary">
+          <dt>PD (probability of default)</dt>
+          <dd>The chance a borrower stops paying in a given year. Here it starts at BC's observed 90-day arrears rate, 0.26%.</dd>
+          <dt>LGD (loss given default)</dt>
+          <dd>The share of the loan the lender loses once a borrower defaults, after selling the home. Insured mortgages pass most of this loss to the insurer.</dd>
+          <dt>EAD (exposure at default)</dt>
+          <dd>How much is still owed on the loan. Summed across loans, it is the size of the book.</dd>
+          <dt>Expected loss (EL)</dt>
+          <dd>PD &times; LGD &times; EAD: what the lender loses in a typical year, averaged over many years.</dd>
+          <dt>ES 99% (expected shortfall)</dt>
+          <dd>The average loss in the worst 1% of simulated years. It describes a bad year rather than a typical one.</dd>
+          <dt>Uplift</dt>
+          <dd>How much higher a number is under a warmer scenario than under historical climate, in dollars or as a percentage.</dd>
+          <dt>Hazard score</dt>
+          <dd>How much of a division's land burns in a year, scaled from 0 to 1. A score of 1 would be twice the worst division-year on record.</dd>
+          <dt>Scenario multiplier</dt>
+          <dd>A single number that scales every division's hazard to stand in for a warmer climate: 1.0 is historical, 2.0 is Hot House.</dd>
+        </dl>
+
+        <h2>How the model works</h2>
+        <ol class="steps">
+          <li>
+            <h3>Hazard</h3>
+            <p>For each census division and each fire season from 1990 to 2025, we measure the share of land inside BC Wildfire Service fire perimeters. That share becomes the hazard score <i>h</i>. A scenario multiplies it by <i>m</i>, capped at 1: <span class="formula">H = min(1, h &times; m)</span>.</p>
+          </li>
+          <li>
+            <h3>Portfolio</h3>
+            <p>We build 100,000 synthetic mortgages and place them across divisions in proportion to the number of owner households with a mortgage in the 2021 Census. Balances, insurance status and home values are drawn at random.</p>
+          </li>
+          <li>
+            <h3>Loss model</h3>
+            <p>Hazard raises both the chance of default and, for uninsured loans, the loss when it happens:
+              <span class="formula">PD = PD<sub>0</sub>(1 + &beta;<sub>PD</sub>H)</span>,
+              <span class="formula">LGD = LGD<sub>0</sub> + &beta;<sub>LGD</sub>H</span>,
+              <span class="formula">EL = PD &times; LGD &times; EAD</span>.
+              PD<sub>0</sub> is set so that under historical climate the BC default rate equals observed arrears.</p>
+          </li>
+          <li>
+            <h3>Simulation</h3>
+            <p>We run 1,000 simulated years. Each one replays a randomly chosen historical fire season, draws the two &beta;s and decides which loans default. Every scenario uses the same draws, so the differences between them come from the multiplier alone. BC tail measures come from the BC total in each run, never from adding up division tails.</p>
+          </li>
+        </ol>
+
+        <h2>Limitations</h2>
+        <ul class="limits">
+          <li>Burned land is not where homes are. Hazard is the share of a division's whole area that burns, and most homes sit in valleys and towns that burn less often than the forest around them.</li>
+          <li>The &beta;s and the scenario multipliers are judgment calls, not estimates from data. The multipliers borrow NGFS scenario names but do not come from NGFS models.</li>
+          <li>ES 99% rests on about 10 runs out of 1,000, and those runs are dominated by a few fire seasons. One more or one fewer extreme season in the record would move it noticeably.</li>
+          <li>Every home is treated as equally vulnerable. Building type, defensible space and distance to the fire edge are not modelled.</li>
+        </ul>
+
+        <h2>Assumptions</h2>
+        <p>Every model input, with its value and where it comes from. Inputs marked <em>placeholder</em> are judgment calls; <em>proxy</em> means the source measures something close to, but not exactly, what the model needs.</p>
+        <details class="assumptions">
+          <summary>Show all assumptions</summary>
+          <div id="assumptions"></div>
+        </details>
+
+        <h2>Data and code</h2>
+        <p>BC Wildfire Service historical fire perimeters (Open Government Licence &ndash; BC); Statistics Canada 2021 Census Profile and census division boundaries; Canadian Bankers Association mortgage arrears; Bank of Canada; OSFI Guideline B-15 for framing.</p>
+        <p>Source code and pipeline: <a href="https://github.com/SamaPatnaik/climate-risk-stresstesting" target="_blank" rel="noopener">github.com/SamaPatnaik/climate-risk-stresstesting</a></p>
       </div>
-    </section>
-
-    <section class="card">
-      <h2>Assumptions</h2>
-      <p class="muted small">Every parameter with its value and source. <span class="badge">placeholder</span> = judgment, not sourced; <span class="badge badge-proxy">proxy</span> = sourced, but measures something close to the model input.</p>
-      <div id="assumptions"></div>
-    </section>
-
-    <section class="card method">
-      <h2>Method in brief</h2>
-      <ul>
-        <li><strong>Hazard.</strong> Share of each division's land burned per year (BC Wildfire Service historical perimeters, 1990&ndash;2025), scaled so twice the worst division-year on record = 1.</li>
-        <li><strong>Model.</strong> H = min(1, h &times; m); PD = PD<sub>0</sub>(1 + &beta;<sub>PD</sub>H); LGD = LGD<sub>0</sub> + &beta;<sub>LGD</sub>H (uninsured loans); EL = PD &times; LGD &times; EAD. PD<sub>0</sub> is calibrated so BC PD equals observed 90+ day arrears (0.26%) under historical climate.</li>
-        <li><strong>Simulation.</strong> Each run draws one historical fire season, both betas and a default for every loan; the same draws are shared across scenarios. Portfolio tail measures come from per-run totals, never sums of division tails.</li>
-        <li><strong>Framing.</strong> Scenario names follow NGFS categories and the exercise is framed against OSFI Guideline B-15; neither is claimed to be reproduced.</li>
-      </ul>
     </section>
   </main>
-
-  <footer class="wrap footer muted small">
-    Data: BC Wildfire Service (Open Government Licence &ndash; BC); Statistics Canada 2021 Census and boundary files; CBA; Bank of Canada; OSFI.
-  </footer>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
